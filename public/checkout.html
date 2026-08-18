@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ApnaMenu — Pay Securely</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #FAF4ED;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      color: #1E1A17;
+    }
+    .container {
+      text-align: center;
+      padding: 40px 24px;
+    }
+    .logo { font-size: 32px; margin-bottom: 8px; }
+    h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+    .amount { font-size: 36px; font-weight: 900; color: #FF521B; margin: 16px 0; }
+    .sub { font-size: 14px; color: #8A7968; font-weight: 600; margin-bottom: 24px; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #F5EBE0;
+      border-top: 4px solid #FF521B;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status { font-size: 16px; font-weight: 700; color: #6E5D4F; }
+    .success { color: #10B981; }
+    .error { color: #D32F2F; }
+    .retry-btn {
+      margin-top: 20px; padding: 14px 32px;
+      background: #FF521B; color: #FFF;
+      border: none; border-radius: 28px;
+      font-size: 16px; font-weight: 800;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🍽️</div>
+    <h1>ApnaMenu Payment</h1>
+    <div class="amount" id="amountDisplay">₹0</div>
+    <div class="sub" id="paymentTypeText">Loading...</div>
+    <div class="spinner" id="spinner"></div>
+    <div class="status" id="statusText">Opening Razorpay...</div>
+    <button class="retry-btn" id="retryBtn" style="display:none;" onclick="openRazorpay()">Retry Payment</button>
+  </div>
+
+  <script>
+    // Parse URL query params
+    const params = new URLSearchParams(window.location.search);
+    const razorpayOrderId = params.get('razorpay_order_id');
+    const razorpayKeyId = params.get('key_id');
+    const amount = parseInt(params.get('amount') || '0');
+    const currency = params.get('currency') || 'INR';
+    const orderId = params.get('order_id');
+    const customerName = decodeURIComponent(params.get('name') || 'Customer');
+    const customerPhone = params.get('phone') || '';
+    const customerEmail = params.get('email') || '';
+    const paymentType = params.get('payment_type') || 'online';
+    const token = params.get('token') || '';
+
+    // Display
+    document.getElementById('amountDisplay').textContent = '₹' + (amount / 100);
+    document.getElementById('paymentTypeText').textContent =
+      paymentType === 'partialCod'
+        ? '30% Advance Payment (Remaining 70% COD)'
+        : '100% Online Payment';
+
+    function openRazorpay() {
+      document.getElementById('spinner').style.display = 'block';
+      document.getElementById('statusText').textContent = 'Opening Razorpay...';
+      document.getElementById('statusText').className = 'status';
+      document.getElementById('retryBtn').style.display = 'none';
+
+      const options = {
+        key: razorpayKeyId,
+        amount: amount,
+        currency: currency,
+        name: 'ApnaMenu',
+        description: paymentType === 'partialCod' ? '30% Advance Payment' : 'Full Payment',
+        order_id: razorpayOrderId,
+        prefill: {
+          name: customerName || undefined,
+          contact: customerPhone || undefined,
+          email: customerEmail || undefined,
+        },
+        theme: {
+          color: '#FF521B',
+        },
+        config: {
+          display: {
+            blocks: {
+              upi: {
+                name: 'Pay via UPI (GPay, PhonePe, Paytm)',
+                instruments: [
+                  {
+                    method: 'upi'
+                  }
+                ]
+              },
+              other: {
+                name: 'Cards, Netbanking & Wallets',
+                instruments: [
+                  { method: 'card' },
+                  { method: 'netbanking' },
+                  { method: 'wallet' }
+                ]
+              }
+            },
+            sequence: ['block.upi', 'block.other']
+          }
+        },
+        handler: function (response) {
+          // Notify React Native WebView if present
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              status: 'success',
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            }));
+            return;
+          }
+
+          // Payment succeeded — verify on backend (fallback for normal web)
+          document.getElementById('spinner').style.display = 'block';
+          document.getElementById('statusText').textContent = 'Verifying payment...';
+
+          fetch('/api/orders/verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + token,
+            },
+            body: JSON.stringify({
+              orderId: orderId,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              document.getElementById('spinner').style.display = 'none';
+              if (data.success) {
+                document.getElementById('statusText').textContent = '✅ Payment Successful!';
+                document.getElementById('statusText').className = 'status success';
+                // Notify WebView via URL change
+                setTimeout(() => {
+                  window.location.href = 'apnamenu://payment-success?order_id=' + orderId;
+                }, 800);
+              } else {
+                document.getElementById('statusText').textContent = '❌ Verification failed: ' + (data.message || 'Unknown error');
+                document.getElementById('statusText').className = 'status error';
+                document.getElementById('retryBtn').style.display = 'inline-block';
+              }
+            })
+            .catch((err) => {
+              document.getElementById('spinner').style.display = 'none';
+              document.getElementById('statusText').textContent = '❌ Network error during verification';
+              document.getElementById('statusText').className = 'status error';
+              document.getElementById('retryBtn').style.display = 'inline-block';
+            });
+        },
+        modal: {
+          ondismiss: function () {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({ status: 'cancelled' }));
+              return;
+            }
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('statusText').textContent = 'Payment cancelled by user';
+            document.getElementById('statusText').className = 'status error';
+            document.getElementById('retryBtn').style.display = 'inline-block';
+            // Notify WebView via deep link fallback
+            setTimeout(() => {
+              window.location.href = 'apnamenu://payment-cancelled?order_id=' + orderId;
+            }, 1500);
+          },
+        },
+      };
+
+      try {
+        const rzp = new Razorpay(options);
+        rzp.on('payment.failed', function (response) {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ status: 'failed', error: response.error }));
+            return;
+          }
+          document.getElementById('spinner').style.display = 'none';
+          document.getElementById('statusText').textContent = '❌ Payment Failed: ' + (response.error?.description || 'Unknown error');
+          document.getElementById('statusText').className = 'status error';
+          document.getElementById('retryBtn').style.display = 'inline-block';
+          setTimeout(() => {
+            window.location.href = 'apnamenu://payment-failed?order_id=' + orderId + '&reason=' + encodeURIComponent(response.error?.description || 'Payment failed');
+          }, 2000);
+        });
+        rzp.open();
+      } catch (e) {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('statusText').textContent = '❌ Could not open Razorpay: ' + e.message;
+        document.getElementById('statusText').className = 'status error';
+        document.getElementById('retryBtn').style.display = 'inline-block';
+      }
+    }
+
+    // Auto-open on load
+    setTimeout(openRazorpay, 500);
+  </script>
+</body>
+</html>
