@@ -106,7 +106,7 @@ const kitchenSchema = new mongoose.Schema({
   },
   verifiedAt: { type: Date, default: null },
   rejectionReason: { type: String, default: null },
-  expoPushToken: { type: String, default: null },
+  expoPushTokens: [{ type: String }],
   suspendedAt: { type: Date, default: null },
   suspendReason: { type: String, default: null },
 }, {

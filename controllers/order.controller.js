@@ -294,27 +294,36 @@ const razorpayWebhook = async (req, res) => {
     }
 
     const { event, payload } = req.body;
-    if (event === 'order.paid' || event === 'payment.captured') {
+    if (event === 'order.paid' || event === 'payment.captured' || event === 'payment_link.paid') {
       const paymentEntity = payload.payment?.entity;
       const orderEntity = payload.order?.entity;
+      const linkEntity = payload.payment_link?.entity;
       const rzpOrderId = orderEntity ? orderEntity.id : paymentEntity?.order_id;
-      if (!rzpOrderId) return res.status(200).send('OK');
-
-      let order = await Order.findOne({ razorpayOrderId: rzpOrderId });
-      // Fallback: razorpayOrderId may have been rotated after a successful capture
-      if (!order) {
-        const appOrderId =
-          orderEntity?.notes?.appOrderId ||
-          paymentEntity?.notes?.appOrderId ||
-          null;
+      
+      let order = null;
+      if (event === 'payment_link.paid') {
+        const appOrderId = linkEntity?.notes?.orderId;
         if (appOrderId) {
-          order = await Order.findOne({
-            orderId: appOrderId,
-            status: 'PENDING_CUSTOMER_PAYMENT',
-            paymentStatus: { $in: ['pending', 'failed', 'awaiting_acceptance'] },
-          });
-          if (order) {
-            order.razorpayOrderId = rzpOrderId;
+          order = await Order.findById(appOrderId);
+        }
+      } else {
+        if (!rzpOrderId) return res.status(200).send('OK');
+        order = await Order.findOne({ razorpayOrderId: rzpOrderId });
+        // Fallback: razorpayOrderId may have been rotated after a successful capture
+        if (!order) {
+          const appOrderId =
+            orderEntity?.notes?.appOrderId ||
+            paymentEntity?.notes?.appOrderId ||
+            null;
+          if (appOrderId) {
+            order = await Order.findOne({
+              orderId: appOrderId,
+              status: 'PENDING_CUSTOMER_PAYMENT',
+              paymentStatus: { $in: ['pending', 'failed', 'awaiting_acceptance'] },
+            });
+            if (order) {
+              order.razorpayOrderId = rzpOrderId;
+            }
           }
         }
       }
@@ -374,7 +383,7 @@ const razorpayWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-      // Atomic conditional update — guarantees only one execution (webhook vs /verify) transitions state
+      const isPaymentLink = event === 'payment_link.paid';
       const updatedOrder = await Order.findOneAndUpdate(
         {
           _id: order._id,
@@ -386,6 +395,7 @@ const razorpayWebhook = async (req, res) => {
             paymentStatus: 'paid',
             razorpayPaymentId: paymentEntity?.id || 'webhook_captured',
             ...(order.status === 'PENDING_CUSTOMER_PAYMENT' ? { status: 'accepted' } : {}),
+            ...(isPaymentLink ? { doorPaymentMode: 'online' } : {}),
           },
         },
         { new: true }
@@ -405,7 +415,14 @@ const razorpayWebhook = async (req, res) => {
 
       const io = req.app.get('io');
       if (io) {
-        emitToKitchen(io, updatedOrder.kitchenId, 'order:paymentVerified', { orderId: updatedOrder._id, order: updatedOrder, customerName, itemsString });
+        if (isPaymentLink) {
+          emitToKitchen(io, updatedOrder.kitchenId, 'order:doorstepPaymentSuccess', { orderId: updatedOrder._id, order: updatedOrder });
+          if (updatedOrder.riderId) {
+            io.to(`rider_${updatedOrder.riderId}`).emit('order:doorstepPaymentSuccess', { orderId: updatedOrder._id, order: updatedOrder });
+          }
+        } else {
+          emitToKitchen(io, updatedOrder.kitchenId, 'order:paymentVerified', { orderId: updatedOrder._id, order: updatedOrder, customerName, itemsString });
+        }
         emitToKitchen(io, updatedOrder.kitchenId, 'order:statusUpdate', { status: updatedOrder.status, order: updatedOrder });
         emitOrderToCustomer(io, updatedOrder, 'order:statusUpdate', { status: updatedOrder.status, order: updatedOrder });
       }
@@ -621,8 +638,8 @@ const placeOrder = async (req, res) => {
     // Notifee background handler in index.js displays the notification with custom sound.
     // sendPushNotification removed — it caused duplicate notifications (double sound/banner).
     try {
-      const kitchenTokenDoc = await Kitchen.findById(kitchenId).select('expoPushToken');
-      if (kitchenTokenDoc && kitchenTokenDoc.expoPushToken) {
+      const kitchenTokenDoc = await Kitchen.findById(kitchenId).select('expoPushTokens');
+      if (kitchenTokenDoc && kitchenTokenDoc.expoPushTokens && kitchenTokenDoc.expoPushTokens.length > 0) {
         const cName = newOrder.customerId?.name || 'A Customer';
         const notificationTitle = '🚨 New Order Received!';
         const notificationBody = formatOrderItemsForNotification(newOrder.items);
@@ -642,9 +659,12 @@ const placeOrder = async (req, res) => {
         // Data-only push: wakes the app process (even killed state) without showing a system notification.
         // Notifee setBackgroundMessageHandler in index.js then creates the notification with
         // the custom 'order_bell' sound via the seller_orders_v2 channel.
-        await sendDataOnlyPush(kitchenTokenDoc.expoPushToken, pushData);
+        const pushPromises = kitchenTokenDoc.expoPushTokens.map(token => 
+          sendDataOnlyPush(token, pushData)
+        );
+        await Promise.all(pushPromises);
 
-        console.log(`[PUSH] New Order data-only push sent to Kitchen ${kitchenId}`);
+        console.log(`[PUSH] New Order data-only push sent to Kitchen ${kitchenId} on ${kitchenTokenDoc.expoPushTokens.length} devices`);
       }
     } catch (pushErr) {
       console.error('[PUSH ERROR] Failed to send new order push notification:', pushErr);
@@ -1504,8 +1524,11 @@ const verifyDeliveryOtp = async (req, res) => {
     }
 
     const claimedDoorMode = doorPaymentMode === 'online' ? 'online' : 'cash';
-    // Door "online"/QR is seller/rider self-report only — never treat as verified capture.
-    // Ledger always settles door remainder as cash-held until a real doorstep webhook exists.
+    
+    if (claimedDoorMode === 'online' && order.paymentStatus !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Please wait for the customer to complete the QR payment.' });
+    }
+
     const updatedOrder = await Order.findOneAndUpdate(
       { _id: order._id, status: 'outForDelivery', deliveryMethod: 'self' },
       {
@@ -1513,7 +1536,6 @@ const verifyDeliveryOtp = async (req, res) => {
           status: 'delivered',
           deliveredAt: Date.now(),
           doorPaymentMode: claimedDoorMode,
-          // Do NOT flip paymentStatus to paid on unverified door QR claim
         }
       },
       { new: true }
@@ -1881,7 +1903,8 @@ const createDoorstepQr = async (req, res) => {
       : (isPartialCod ? Math.round((order.grandTotal || 0) * (1 - onlinePct)) : (order.grandTotal || 0));
     const amountInPaise = cashAmount * 100;
 
-    let razorpayOrderId = null;
+    let paymentLinkUrl = null;
+    let razorpayPaymentLinkId = null;
     if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
       try {
         const Razorpay = require('razorpay');
@@ -1889,19 +1912,34 @@ const createDoorstepQr = async (req, res) => {
           key_id: process.env.RAZORPAY_KEY_ID,
           key_secret: process.env.RAZORPAY_KEY_SECRET,
         });
-        const rzOrder = await rz.orders.create({
+        
+        await order.populate('customerId', 'name phone');
+        
+        const plink = await rz.paymentLink.create({
           amount: amountInPaise,
           currency: 'INR',
-          receipt: `door_${order.orderId || order._id}`,
+          accept_partial: false,
+          description: `Doorstep Payment for Order ${order.orderId || order._id}`,
+          customer: {
+            name: order.customerName || order.customerId?.name || 'Customer',
+            contact: order.customerPhone || order.customerId?.phone || '',
+          },
+          notify: {
+            sms: false,
+            email: false,
+          },
+          reminder_enable: false,
           notes: { orderId: order._id.toString(), type: 'doorstep_cod' },
         });
-        razorpayOrderId = rzOrder.id;
+        
+        paymentLinkUrl = plink.short_url;
+        razorpayPaymentLinkId = plink.id;
       } catch (err) {
-        console.error('Razorpay doorstep QR error:', err);
+        console.error('Razorpay doorstep Payment Link error:', err);
       }
     }
 
-    if (!razorpayOrderId) {
+    if (!paymentLinkUrl) {
       return res.status(503).json({
         success: false,
         message: 'Payment gateway unavailable. Please try cash collection or retry later.',
@@ -1915,7 +1953,8 @@ const createDoorstepQr = async (req, res) => {
         amount: amountInPaise,
         currency: 'INR',
         cashAmount,
-        razorpayOrderId,
+        paymentLinkUrl,
+        razorpayPaymentLinkId,
         razorpayKeyId: process.env.RAZORPAY_KEY_ID,
       },
     });

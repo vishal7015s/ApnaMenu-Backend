@@ -44,7 +44,7 @@ module.exports = {
         data: { ...data, timestamp: String(Date.now()) },
         android: {
           priority: 'high',        // FCM transport priority — bypasses Doze mode
-          ttl: 0,                  // Time-to-live = 0: deliver NOW or not at all (no queuing delay)
+          ttl: 60,                 // Time-to-live = 60: retry for up to 60s if device is in doze/offline
           restrictedPackageName: undefined,
         },
         apns: {
@@ -73,7 +73,7 @@ module.exports = {
           const Kitchen = require('../models/Kitchen');
           await Promise.all([
             Rider.updateOne({ expoPushToken: token }, { $unset: { expoPushToken: '' } }),
-            Kitchen.updateOne({ expoPushToken: token }, { $unset: { expoPushToken: '' } }),
+            Kitchen.updateOne({ expoPushTokens: token }, { $pull: { expoPushTokens: token } }),
           ]);
         } catch (dbErr) {
           console.error('Failed to clear stale token from DB:', dbErr.message);

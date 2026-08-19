@@ -516,10 +516,15 @@ const verifyDrop = async (req, res) => {
       });
     }
 
+    const claimedDoorMode = doorPaymentMode === 'online' ? 'online' : 'cash';
+    
+    if (claimedDoorMode === 'online' && order.paymentStatus !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Please wait for the customer to complete the QR payment.' });
+    }
+
     order.status = 'delivered';
     order.deliveredAt = new Date();
-    // Door QR/online is self-reported — store claim only; never mark paid without gateway proof
-    order.doorPaymentMode = doorPaymentMode === 'online' ? 'online' : 'cash';
+    order.doorPaymentMode = claimedDoorMode;
     await order.save();
 
     await recordDeliveredOrderStats(order, { logPrefix: '[rider/delivery]' });

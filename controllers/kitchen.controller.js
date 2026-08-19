@@ -42,9 +42,21 @@ const updatePushToken = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No kitchen associated with this account' });
     }
 
+    let updateOp = expoPushToken
+      ? { $addToSet: { expoPushTokens: expoPushToken } }
+      : { $pull: { expoPushTokens: req.body.oldToken || expoPushToken } };
+
+    if (!expoPushToken && !req.body.oldToken) {
+       // If just setting null without specifying which token to remove, we might not want to clear ALL tokens.
+       // The mobile app usually doesn't send oldToken, so if it sends null, we clear the array for safety or keep it as is.
+       // Actually, to be safe, if they send null, let's clear the whole array (user logging out from all, or just clear the array).
+       // A better approach is to require the exact token to remove. If none provided, we just return.
+       updateOp = { $set: { expoPushTokens: [] } };
+    }
+
     await Kitchen.findByIdAndUpdate(
       req.user.kitchenId,
-      { expoPushToken: expoPushToken || null },
+      updateOp,
       { new: true }
     );
 

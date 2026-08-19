@@ -17,10 +17,10 @@ async function collectFcmTokens(targetRole) {
   }
 
   if (targetRole === 'kitchen' || targetRole === 'all') {
-    const kitchens = await Kitchen.find({}).select('expoPushToken ownerId').lean();
+    const kitchens = await Kitchen.find({}).select('expoPushTokens ownerId').lean();
     for (const kitchen of kitchens) {
-      if (kitchen.expoPushToken) {
-        tokenSet.add(kitchen.expoPushToken);
+      if (kitchen.expoPushTokens && kitchen.expoPushTokens.length > 0) {
+        kitchen.expoPushTokens.forEach(t => tokenSet.add(t));
       } else if (kitchen.ownerId) {
         const user = await User.findById(kitchen.ownerId).select('fcmToken').lean();
         if (user?.fcmToken) tokenSet.add(user.fcmToken);
@@ -60,17 +60,17 @@ async function collectFcmTokensForRecipient(targetRole, recipientId) {
       if (user?.fcmToken) tokenSet.add(user.fcmToken);
     }
   } else if (targetRole === 'kitchen') {
-    const kitchen = await Kitchen.findById(recipientId).select('expoPushToken ownerId').lean();
-    if (kitchen?.expoPushToken) {
-      tokenSet.add(kitchen.expoPushToken);
+    const kitchen = await Kitchen.findById(recipientId).select('expoPushTokens ownerId').lean();
+    if (kitchen?.expoPushTokens && kitchen.expoPushTokens.length > 0) {
+      kitchen.expoPushTokens.forEach(t => tokenSet.add(t));
     } else if (kitchen?.ownerId) {
       const user = await User.findById(kitchen.ownerId).select('fcmToken').lean();
       if (user?.fcmToken) tokenSet.add(user.fcmToken);
     }
 
     if (tokenSet.size === 0) {
-      const kitchenByOwner = await Kitchen.findOne({ ownerId: recipientId }).select('expoPushToken').lean();
-      if (kitchenByOwner?.expoPushToken) tokenSet.add(kitchenByOwner.expoPushToken);
+      const kitchenByOwner = await Kitchen.findOne({ ownerId: recipientId }).select('expoPushTokens').lean();
+      if (kitchenByOwner?.expoPushTokens) kitchenByOwner.expoPushTokens.forEach(t => tokenSet.add(t));
       const user = await User.findById(recipientId).select('fcmToken').lean();
       if (user?.fcmToken) tokenSet.add(user.fcmToken);
     }
@@ -79,12 +79,12 @@ async function collectFcmTokensForRecipient(targetRole, recipientId) {
     const [user, rider, kitchen] = await Promise.all([
       User.findById(recipientId).select('fcmToken').lean(),
       Rider.findById(recipientId).select('expoPushToken userId').lean(),
-      Kitchen.findById(recipientId).select('expoPushToken ownerId').lean(),
+      Kitchen.findById(recipientId).select('expoPushTokens ownerId').lean(),
     ]);
     if (user?.fcmToken) tokenSet.add(user.fcmToken);
     if (rider?.expoPushToken) tokenSet.add(rider.expoPushToken);
-    if (kitchen?.expoPushToken) tokenSet.add(kitchen.expoPushToken);
-    if (kitchen?.ownerId && !kitchen?.expoPushToken) {
+    if (kitchen?.expoPushTokens) kitchen.expoPushTokens.forEach(t => tokenSet.add(t));
+    if (kitchen?.ownerId && (!kitchen?.expoPushTokens || kitchen.expoPushTokens.length === 0)) {
       const ownerUser = await User.findById(kitchen.ownerId).select('fcmToken').lean();
       if (ownerUser?.fcmToken) tokenSet.add(ownerUser.fcmToken);
     }
