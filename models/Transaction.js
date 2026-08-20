@@ -44,7 +44,6 @@ const transactionSchema = new mongoose.Schema({
   razorpayPaymentId: {
     type: String,
     default: null,
-    sparse: true,
   },
 }, {
   timestamps: true,
