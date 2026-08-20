@@ -452,6 +452,7 @@ const verifyPickup = async (req, res) => {
 
     const populatedOrder = await Order.findById(order._id)
       .populate('customerId', 'name phone avatar')
+      .populate('riderId', 'name phone avatar')
       .populate({
         path: 'kitchenId',
         select: 'name address location ownerId upiId paymentMethods',
@@ -562,6 +563,7 @@ const verifyDrop = async (req, res) => {
 
     const populatedOrder = await Order.findById(order._id)
       .populate('customerId', 'name phone avatar')
+      .populate('riderId', 'name phone avatar')
       .populate({
         path: 'kitchenId',
         select: 'name address location ownerId upiId paymentMethods',

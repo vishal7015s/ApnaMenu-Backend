@@ -2266,7 +2266,15 @@ const confirmRiderHandover = async (req, res) => {
       };
       emitOrderToCustomer(io, order, 'order:statusUpdate', payload);
       emitToKitchen(io, order.kitchenId, 'order:statusUpdate', payload);
+      io.to(`order_${order._id}`).emit('order:statusUpdate', payload);
       io.to(`rider_${order.riderId}`).emit('order:statusUpdate', payload);
+      io.to(`user_${order.riderId}`).emit('order:statusUpdate', payload);
+
+      // Dedicated handover event
+      emitToKitchen(io, order.kitchenId, 'order:handoverConfirmed', payload);
+      io.to(`order_${order._id}`).emit('order:handoverConfirmed', payload);
+      io.to(`rider_${order.riderId}`).emit('order:handoverConfirmed', payload);
+      io.to(`user_${order.riderId}`).emit('order:handoverConfirmed', payload);
     }
 
     res.json({ success: true, message: 'Handed over to rider', data: toKitchenOrderDTO(populatedOrder || order) });
