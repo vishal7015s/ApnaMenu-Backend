@@ -632,7 +632,8 @@ const getKitchens = async (req, res) => {
     }
 
     const kitchens = await Kitchen.find(query)
-      .select('name ownerName upiId accountStatus verificationStatus verifiedAt rejectionReason isOpen totalOrders totalEarnings avgRating createdAt pinCode')
+      .select('name ownerName upiId fssaiNumber photo location accountStatus verificationStatus verifiedAt rejectionReason isOpen totalOrders totalEarnings avgRating createdAt pinCode ownerId')
+      .populate('ownerId', 'name phone')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
