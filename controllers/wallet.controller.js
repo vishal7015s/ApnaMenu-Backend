@@ -351,8 +351,9 @@ const createDepositOrder = async (req, res) => {
 
 /**
  * Idempotent credit for a captured Razorpay wallet deposit.
- * Uses atomic lock on WalletDeposit.findOneAndUpdate with status != 'credited'
- * to guarantee that EXACTLY ONE execution can ever credit the balance.
+ * Strict Single-Execution Lock:
+ * Only a document with status: 'pending' can transition to status: 'credited'.
+ * The balance increment is executed strictly ONCE by whichever request wins the atomic transition.
  */
 const creditCapturedDeposit = async ({
   razorpayOrderId,
@@ -375,18 +376,19 @@ const creditCapturedDeposit = async ({
   // 1. Check if Transaction with this razorpayPaymentId was already recorded
   const existingTxn = await Transaction.findOne({ razorpayPaymentId }).lean();
   if (existingTxn) {
+    console.log(`[DEPOSIT LOCK] Transaction ${razorpayPaymentId} already recorded. Aborting duplicate credit.`);
     const finalUserId = userId || existingTxn.userId;
     const finalRole = role || 'rider';
     const wallet = await getOrCreateWallet(finalUserId, finalRole);
     return { alreadyProcessed: true, wallet };
   }
 
-  // 2. ATOMIC CLAIM: Atomically transition status from 'pending' to 'credited'
-  // If status is ALREADY 'credited', findOneAndUpdate returns null (0 matched).
+  // 2. ATOMIC LOCK: Transition status from STRICTLY 'pending' -> 'credited'
+  // If status is already 'credited' or not found, findOneAndUpdate returns null.
   const claimedDeposit = await WalletDeposit.findOneAndUpdate(
     {
       razorpayOrderId,
-      status: { $ne: 'credited' },
+      status: 'pending',
     },
     {
       $set: {
@@ -395,39 +397,22 @@ const creditCapturedDeposit = async ({
         amount: creditAmount,
       },
     },
-    { new: false }
+    { new: true }
   );
 
-  let ownerId = claimedDeposit?.userId || userId;
-  let ownerRole = claimedDeposit?.role || role;
-
+  // If claimedDeposit is null, it means another thread (e.g. Webhook or client verify)
+  // has ALREADY claimed and credited this exact razorpayOrderId!
   if (!claimedDeposit) {
-    // If no deposit was claimed, check if it was already credited earlier
+    console.log(`[DEPOSIT LOCK] razorpayOrderId ${razorpayOrderId} already credited or not pending. Aborting duplicate credit.`);
     const existingDep = await WalletDeposit.findOne({ razorpayOrderId }).lean();
-    if (existingDep && existingDep.status === 'credited') {
-      const wallet = await getOrCreateWallet(existingDep.userId, existingDep.role);
-      return { alreadyProcessed: true, wallet };
-    }
-
-    // If no deposit record existed at all (e.g. direct webhook payment without pre-created order)
-    try {
-      await WalletDeposit.create({
-        userId: ownerId,
-        role: ownerRole,
-        amount: creditAmount,
-        razorpayOrderId,
-        razorpayPaymentId,
-        status: 'credited',
-      });
-    } catch (dupErr) {
-      if (dupErr.code === 11000) {
-        // Another concurrent request created it simultaneously!
-        const wallet = await getOrCreateWallet(ownerId, ownerRole);
-        return { alreadyProcessed: true, wallet };
-      }
-      throw dupErr;
-    }
+    const ownerId = existingDep?.userId || userId;
+    const ownerRole = existingDep?.role || role || 'rider';
+    const wallet = await getOrCreateWallet(ownerId, ownerRole);
+    return { alreadyProcessed: true, wallet };
   }
+
+  const ownerId = claimedDeposit.userId || userId;
+  const ownerRole = claimedDeposit.role || role;
 
   if (!ownerId || !ownerRole) {
     const err = new Error('Deposit record not found for this payment');
@@ -443,20 +428,22 @@ const creditCapturedDeposit = async ({
   }
 
   const walletDoc = await getOrCreateWallet(ownerId, ownerRole);
+  const finalAmount = claimedDeposit.amount || creditAmount;
 
-  // 3. Atomically increment wallet balance and record Transaction
+  // 3. Atomically increment wallet balance by exact amount ONCE
   const wallet = await Wallet.findByIdAndUpdate(
     walletDoc._id,
-    { $inc: { balance: creditAmount } },
+    { $inc: { balance: finalAmount } },
     { new: true }
   );
 
+  // 4. Record ledger transaction
   try {
     await Transaction.create({
       kitchenId: null,
       orderId: null,
       type: 'deposit',
-      amount: creditAmount,
+      amount: finalAmount,
       description: `Wallet Deposit (Ref: ${razorpayPaymentId})`,
       walletId: walletDoc._id,
       razorpayPaymentId,
