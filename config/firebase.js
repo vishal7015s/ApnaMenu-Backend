@@ -9,10 +9,12 @@ module.exports = {
       // never reuse a channel that may have been created without sound).
       const channelId =
         data?.type === 'order_broadcast'
-          ? 'rider_orders'
+          ? 'rider_orders_v2'
           : data?.type === 'seller_new_order'
-            ? 'seller_orders'
+            ? 'seller_orders_v2'
             : 'default';
+
+      const isOrderAlert = channelId.includes('_orders');
 
       const message = {
         token,
@@ -23,8 +25,8 @@ module.exports = {
           notification: {
             channelId,
             priority: 'high',
-            sound: 'default',
-            defaultSound: true,
+            sound: isOrderAlert ? 'order_bell' : 'default',
+            defaultSound: !isOrderAlert,
             defaultVibrateTimings: true,
           },
         },

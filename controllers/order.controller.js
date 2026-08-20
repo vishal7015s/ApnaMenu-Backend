@@ -1886,13 +1886,17 @@ const rateOrder = async (req, res) => {
   }
 };
 
-/**
- * @route   POST /api/orders/:id/doorstep-qr
- * @desc    Create dynamic Razorpay order / UPI QR for doorstep pending COD amount
- */
 const createDoorstepQr = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const idParam = req.params.id;
+    const mongoose = require('mongoose');
+    let order = null;
+    if (mongoose.Types.ObjectId.isValid(idParam)) {
+      order = await Order.findById(idParam);
+    }
+    if (!order) {
+      order = await Order.findOne({ orderId: idParam });
+    }
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
     const isPartialCod = order.paymentType === 'partialCod';
@@ -1905,7 +1909,7 @@ const createDoorstepQr = async (req, res) => {
 
     let paymentLinkUrl = null;
     let razorpayPaymentLinkId = null;
-    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET && amountInPaise >= 100) {
       try {
         const Razorpay = require('razorpay');
         const rz = new Razorpay({
@@ -1915,6 +1919,9 @@ const createDoorstepQr = async (req, res) => {
         
         await order.populate('customerId', 'name phone');
         
+        const rawPhone = order.customerPhone || order.customerId?.phone || '';
+        const cleanPhone = String(rawPhone).replace(/[^0-9]/g, '').slice(-10);
+        
         const plink = await rz.paymentLink.create({
           amount: amountInPaise,
           currency: 'INR',
@@ -1922,7 +1929,7 @@ const createDoorstepQr = async (req, res) => {
           description: `Doorstep Payment for Order ${order.orderId || order._id}`,
           customer: {
             name: order.customerName || order.customerId?.name || 'Customer',
-            contact: order.customerPhone || order.customerId?.phone || '',
+            ...(cleanPhone.length === 10 ? { contact: cleanPhone } : {}),
           },
           notify: {
             sms: false,
@@ -1935,15 +1942,13 @@ const createDoorstepQr = async (req, res) => {
         paymentLinkUrl = plink.short_url;
         razorpayPaymentLinkId = plink.id;
       } catch (err) {
-        console.error('Razorpay doorstep Payment Link error:', err);
+        console.error('Razorpay doorstep Payment Link error:', err.error || err.message || err);
       }
     }
 
+    // Direct UPI intent QR fallback (scannable by all UPI apps)
     if (!paymentLinkUrl) {
-      return res.status(503).json({
-        success: false,
-        message: 'Payment gateway unavailable. Please try cash collection or retry later.',
-      });
+      paymentLinkUrl = `upi://pay?pa=razorpay-apnamenu@icici&pn=ApnaMenu&am=${cashAmount}&cu=INR&tn=Order_${order.orderId || order._id}`;
     }
 
     res.json({

@@ -24,7 +24,7 @@ function toKitchenCardDto(kitchen, { foodType, distanceKm }) {
     avgRating: rating,
     totalReviews: kitchen.totalReviews ?? 0,
     distanceKm: dist,
-    foodType: foodType || 'both',
+    foodType: foodType || 'veg',
     isOpen: kitchen.isOpen !== false,
     isAcceptingOrders: kitchen.isOpen !== false,
   };

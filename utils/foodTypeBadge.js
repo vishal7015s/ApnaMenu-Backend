@@ -2,14 +2,13 @@
  * Derive veg / non-veg / both badge from menu item type values.
  */
 function deriveFoodTypeBadge(types) {
-  const set = new Set((types || []).filter(Boolean));
-  const hasVeg = set.has('veg');
-  const hasNonVeg = set.has('nonveg');
+  const cleanTypes = (types || []).filter(Boolean);
+  const hasNonVeg = cleanTypes.some((t) => t === 'nonveg' || t === 'non-veg');
+  const hasVeg = cleanTypes.some((t) => t === 'veg');
 
   if (hasVeg && hasNonVeg) return 'both';
-  if (hasNonVeg) return 'non-veg';
-  if (hasVeg) return 'veg';
-  return 'both';
+  if (hasNonVeg && !hasVeg) return 'non-veg';
+  return 'veg';
 }
 
 async function loadFoodTypeBadgesByKitchen(MenuItem, kitchenIds) {

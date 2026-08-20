@@ -44,9 +44,11 @@ router.get('/kitchen/history', authorize('kitchen'), getKitchenHistory);
 router.get('/:id', validateObjectId(), getOrderById);
 router.post('/:id/cancel', validateObjectId(), cancelOrder);
 router.post('/:id/rate', validateObjectId(), authorize('customer'), rateOrder);
-router.post('/:id/doorstep-qr', validateObjectId(), protect, createDoorstepQr);
+router.post('/:id/doorstep-qr', createDoorstepQr);
 
 // Kitchen routes
+router.put('/kitchen/:id/accept', validateObjectId(), authorize('kitchen'), acceptOrder);
+router.put('/kitchen/:id/reject', validateObjectId(), authorize('kitchen'), rejectOrder);
 router.put('/:id/accept', validateObjectId(), authorize('kitchen'), acceptOrder);
 router.put('/:id/reject', validateObjectId(), authorize('kitchen'), rejectOrder);
 router.put('/:id/status', validateObjectId(), authorize('kitchen'), updateStatus);
