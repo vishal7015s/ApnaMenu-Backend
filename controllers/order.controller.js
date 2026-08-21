@@ -1557,6 +1557,7 @@ const verifyDeliveryOtp = async (req, res) => {
         order: toKitchenOrderDTO(updatedOrder),
       };
       emitToKitchen(io, updatedOrder.kitchenId, 'order:statusUpdate', payload);
+      emitToKitchen(io, updatedOrder.kitchenId, 'wallet:updated', {});
     }
 
     res.json({
@@ -2249,7 +2250,8 @@ const confirmRiderHandover = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid handover PIN' });
     }
 
-    order.kitchenHandoverAt = Date.now();
+    const handoverTs = new Date();
+    order.kitchenHandoverAt = handoverTs;
     await order.save();
 
     const populatedOrder = await Order.findById(order._id)
@@ -2257,24 +2259,33 @@ const confirmRiderHandover = async (req, res) => {
       .populate('riderId', 'name phone avatar')
       .populate('kitchenId', 'name address location phone');
 
+    const orderIdStr = order._id.toString();
+    const riderUserId = order.riderId ? (order.riderId._id ? order.riderId._id.toString() : order.riderId.toString()) : null;
+    const orderObj = populatedOrder ? (typeof populatedOrder.toObject === 'function' ? populatedOrder.toObject() : populatedOrder) : (typeof order.toObject === 'function' ? order.toObject() : order);
+    orderObj.kitchenHandoverAt = handoverTs;
+
     const io = req.app.get('io');
     if (io) {
       const payload = {
         status: order.status,
-        orderId: order._id,
-        order: populatedOrder || order,
+        orderId: orderIdStr,
+        order: orderObj,
       };
       emitOrderToCustomer(io, order, 'order:statusUpdate', payload);
       emitToKitchen(io, order.kitchenId, 'order:statusUpdate', payload);
-      io.to(`order_${order._id}`).emit('order:statusUpdate', payload);
-      io.to(`rider_${order.riderId}`).emit('order:statusUpdate', payload);
-      io.to(`user_${order.riderId}`).emit('order:statusUpdate', payload);
+      io.to(`order_${orderIdStr}`).emit('order:statusUpdate', payload);
+      if (riderUserId) {
+        io.to(`rider_${riderUserId}`).emit('order:statusUpdate', payload);
+        io.to(`user_${riderUserId}`).emit('order:statusUpdate', payload);
+      }
 
       // Dedicated handover event
       emitToKitchen(io, order.kitchenId, 'order:handoverConfirmed', payload);
-      io.to(`order_${order._id}`).emit('order:handoverConfirmed', payload);
-      io.to(`rider_${order.riderId}`).emit('order:handoverConfirmed', payload);
-      io.to(`user_${order.riderId}`).emit('order:handoverConfirmed', payload);
+      io.to(`order_${orderIdStr}`).emit('order:handoverConfirmed', payload);
+      if (riderUserId) {
+        io.to(`rider_${riderUserId}`).emit('order:handoverConfirmed', payload);
+        io.to(`user_${riderUserId}`).emit('order:handoverConfirmed', payload);
+      }
     }
 
     res.json({ success: true, message: 'Handed over to rider', data: toKitchenOrderDTO(populatedOrder || order) });

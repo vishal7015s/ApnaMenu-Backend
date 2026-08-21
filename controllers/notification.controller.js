@@ -195,12 +195,15 @@ const sendNotification = async (req, res) => {
       tokenSet = await collectFcmTokens(targetRole);
     }
 
-    console.log(`📣 [Admin Notification] targetRole=${targetRole}, recipientId=${recipientId}, collectedTokens=${tokenSet.size}`);
-
     const pushData = {
       type: 'admin_notification',
       notificationId: String(notification._id),
       targetRole,
+      title: String(title),
+      message: String(message),
+      body: String(message),
+      notificationTitle: String(title),
+      notificationBody: String(message),
     };
 
     tokenSet.forEach((token) => {

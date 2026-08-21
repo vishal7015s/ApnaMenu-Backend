@@ -350,7 +350,13 @@ const getDashboard = async (req, res) => {
             $cond: [
               { $eq: ['$deliveryMethod', 'rider'] },
               { $ifNull: ['$itemTotal', 0] },
-              { $add: [{ $ifNull: ['$itemTotal', 0] }, { $ifNull: ['$deliveryFee', 0] }] },
+              {
+                $add: [
+                  { $ifNull: ['$itemTotal', 0] },
+                  { $ifNull: ['$deliveryFee', 0] },
+                  { $ifNull: ['$platformFee', 0] },
+                ],
+              },
             ],
           },
         },
@@ -439,7 +445,7 @@ const getOrderEarning = (o) => {
   if (o.status !== 'delivered') return 0;
   return o.deliveryMethod === 'rider'
     ? (Number(o.itemTotal) || 0)
-    : ((Number(o.itemTotal) || 0) + (Number(o.deliveryFee) || 0));
+    : ((Number(o.itemTotal) || 0) + (Number(o.deliveryFee) || 0) + (Number(o.platformFee) || 0));
 };
 
 const buildDailyStatsFromOrders = (orders) => {

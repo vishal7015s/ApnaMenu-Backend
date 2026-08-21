@@ -592,7 +592,10 @@ const verifyDrop = async (req, res) => {
       if (order.kitchenId || populatedOrder?.kitchenId?._id) {
         const kId = order.kitchenId || populatedOrder.kitchenId._id;
         io.to(`kitchen_${kId}`).emit('order:statusUpdate', payload);
+        io.to(`kitchen_${kId}`).emit('wallet:updated', {});
       }
+      io.to(`rider_${req.user._id}`).emit('wallet:updated', {});
+      io.to(`user_${req.user._id}`).emit('wallet:updated', {});
     }
   } catch (error) {
     console.error('verifyDrop error:', error);

@@ -76,15 +76,10 @@ function getDeliveryPricing(distanceKm) {
   };
 }
 
-/** Rider (or self-delivery) earning from fees on an order. */
+/** Deliverer (rider or self-delivering seller) earning from fees on an order. */
 function getDelivererFeeEarning(order) {
   if (!order) return 0;
   const deliveryFee = Number(order.deliveryFee) || 0;
-  
-  if (order.deliveryMethod === 'self') {
-    return deliveryFee;
-  }
-  
   const platformFee = Number(order.platformFee) || 0;
   return deliveryFee + platformFee;
 }

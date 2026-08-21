@@ -1,5 +1,5 @@
+require('./firebase-admin');
 const { getMessaging } = require('firebase-admin/messaging');
-// Firebase is already initialized in firebase-admin.js
 
 module.exports = {
   // For Admin notifications — shows as a visible notification in the status bar
@@ -12,22 +12,29 @@ module.exports = {
           ? 'rider_orders_v2'
           : data?.type === 'seller_new_order'
             ? 'seller_orders_v2'
-            : 'default';
+            : 'general_alerts_v2';
 
       const isOrderAlert = channelId.includes('_orders');
 
       const message = {
         token,
         notification: { title, body },
-        data: { ...data, timestamp: String(Date.now()) },
+        data: {
+          ...data,
+          title: String(title),
+          body: String(body),
+          message: String(body),
+          timestamp: String(Date.now()),
+        },
         android: {
           priority: 'high',
           notification: {
             channelId,
-            priority: 'high',
+            priority: 'max',
             sound: isOrderAlert ? 'order_bell' : 'default',
             defaultSound: !isOrderAlert,
             defaultVibrateTimings: true,
+            visibility: 'public',
           },
         },
       };

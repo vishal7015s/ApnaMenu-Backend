@@ -804,7 +804,7 @@ const getWalletTransactions = async (req, res) => {
 
     const allowedTypes = role === 'rider' || req.query.type === 'wallet_only'
       ? ['deposit', 'withdrawal', 'withdrawal_request', 'withdrawal_success', 'withdrawal_rejected']
-      : ['deposit', 'withdrawal', 'withdrawal_request', 'withdrawal_success', 'withdrawal_rejected'];
+      : ['deposit', 'withdrawal', 'withdrawal_request', 'withdrawal_success', 'withdrawal_rejected', 'advance', 'cash'];
 
     const [transactions, total] = await Promise.all([
       Transaction.find({
