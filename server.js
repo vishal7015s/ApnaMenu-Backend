@@ -46,7 +46,7 @@ const dishRoutes = require('./routes/dish.routes');
 
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
-  : ['http://localhost:3000', 'http://localhost:5173'];
+  : ['http://localhost:3000', 'http://localhost:5173', 'https://adminapnamenu.vercel.app'];
 
 const socketCorsOrigins = process.env.SOCKET_CORS_ORIGINS
   ? process.env.SOCKET_CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
