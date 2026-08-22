@@ -38,7 +38,7 @@ function createLimiter({ windowMs, max, message, prefix, keyGenerator }) {
  */
 const otpRateLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 30,
   prefix: 'rl:verify-otp',
   message: {
     success: false,
